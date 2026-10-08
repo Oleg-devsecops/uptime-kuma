@@ -1,0 +1,307 @@
+# =============================================================================
+# DevSecOps Pipeline для Uptime Kuma (форк)
+# -----------------------------------------------------------------------------
+# Этапы:
+#   1. build      — линт, сборка, unit-тесты
+#   2. sast       — статический анализ (Semgrep)
+#   3. secrets    — поиск утечек (Gitleaks)
+#   4. sca        — анализ зависимостей (npm audit + Trivy fs)
+#   5. container  — Hadolint + Trivy image
+#
+# Дополнительные этапы (deploy, dast, gateway) добавятся позже.
+# Все security-jobs имеют continue-on-error: true, чтобы не блокировать сборку
+# на этапе отладки пайплайна. Security Gateway (позже) будет применять пороги.
+# =============================================================================
+
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devsecops-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "26.2.0"
+
+jobs:
+  # ===========================================================================
+  # 1. BUILD
+  # ===========================================================================
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint JS
+        run: npm run lint:js
+
+      - name: Build
+        run: npm run build
+
+      - name: Backend tests
+        run: npm run test-backend
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  # ===========================================================================
+  # 2. SAST (Semgrep)
+  # ===========================================================================
+  sast-semgrep:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/javascript
+            p/typescript
+            p/vue
+            p/nodejs
+            p/owasp-top-ten
+            p/secrets
+          generateSarif: "1"
+        continue-on-error: true
+
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+        continue-on-error: true
+
+  # ===========================================================================
+  # 3. SECRETS (Gitleaks)
+  # ===========================================================================
+  secrets-gitleaks:
+    name: Secrets (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_COMMENTS: "false"
+        continue-on-error: true
+
+      - name: Upload Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: results.sarif
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # 4. SCA (npm audit + Trivy fs)
+  # ===========================================================================
+  sca:
+    name: SCA (npm audit + Trivy fs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: npm audit (production deps)
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          npm audit --omit=dev --json > npm-audit.json || true
+          echo "npm audit report saved"
+        continue-on-error: true
+
+      - name: Upload npm audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report
+          path: npm-audit.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Trivy fs scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+          exit-code: "0"
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-sarif
+          path: trivy-fs.sarif
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+        continue-on-error: true
+
+  # ===========================================================================
+  # 5. CONTAINER (Hadolint + Trivy image)
+  # ===========================================================================
+  container:
+    name: Container (Hadolint + Trivy image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Hadolint (Dockerfile linter)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/dockerfile
+          failure-threshold: warning
+          output-format: sarif
+          output-file: hadolint.sarif
+        continue-on-error: true
+
+      - name: Upload Hadolint SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hadolint-sarif
+          path: hadolint.sarif
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload Hadolint SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: hadolint.sarif
+          category: hadolint
+        continue-on-error: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (local)
+        run: |
+          docker build \
+            -f docker/dockerfile \
+            -t uptime-kuma:devsecops-${{ github.sha }} \
+            .
+        continue-on-error: true
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: uptime-kuma:devsecops-${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+        continue-on-error: true
+
+      - name: Upload Trivy image SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-sarif
+          path: trivy-image.sarif
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload Trivy image SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+        continue-on-error: true
