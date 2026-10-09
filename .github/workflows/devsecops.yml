@@ -64,7 +64,7 @@ jobs:
 
       - name: Backend tests (core, must pass)
         run: |
-          cross-env TEST_BACKEND=1 node --import=tsx --test --test-reporter=spec \
+          npx cross-env TEST_BACKEND=1 node --import=tsx --test --test-reporter=spec \
             "test/backend-test/check-translations.test.js" \
             "test/backend-test/test-better-auth.ts" \
             "test/backend-test/test-cert-hostname-match.js" \
