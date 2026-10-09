@@ -273,9 +273,6 @@ jobs:
           failure-threshold: warning
         continue-on-error: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build Docker image (local)
         run: |
           docker build \
@@ -345,9 +342,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -355,23 +349,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/uptime-kuma
-          tags: |
-            type=raw,value=latest
-            type=sha,prefix=sha-,format=short
+      - name: Build and push image to GHCR
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/uptime-kuma
+          SHA_SHORT=$(echo $GITHUB_SHA | cut -c1-7)
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/dockerfile
-          target: release
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          docker build \
+            --target release \
+            -f docker/dockerfile \
+            -t $IMAGE:latest \
+            -t $IMAGE:sha-$SHA_SHORT \
+            .
+
+          docker push $IMAGE:latest
+          docker push $IMAGE:sha-$SHA_SHORT
+
+
