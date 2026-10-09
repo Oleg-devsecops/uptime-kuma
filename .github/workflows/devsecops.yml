@@ -290,6 +290,7 @@ jobs:
       - name: Build Docker image (local)
         run: |
           docker build \
+            --target release \
             -f docker/dockerfile \
             -t uptime-kuma:devsecops-${{ github.sha }} \
             .
@@ -379,6 +380,7 @@ jobs:
         with:
           context: .
           file: docker/dockerfile
+          target: release
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
