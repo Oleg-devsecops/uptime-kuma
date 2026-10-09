@@ -108,17 +108,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          config: >-
-            p/javascript
-            p/typescript
-            p/vue
-            p/nodejs
-            p/owasp-top-ten
-            p/secrets
-          generateSarif: "1"
+          python-version: '3.12'
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config=p/javascript \
+            --config=p/typescript \
+            --config=p/vue \
+            --config=p/nodejs \
+            --config=p/owasp-top-ten \
+            --config=p/secrets \
+            --sarif \
+            --output=semgrep.sarif \
+            --metrics=off \
+            || true
         continue-on-error: true
 
       - name: Upload SARIF artifact
@@ -263,25 +273,6 @@ jobs:
         with:
           dockerfile: docker/dockerfile
           failure-threshold: warning
-          output-format: sarif
-          output-file: hadolint.sarif
-        continue-on-error: true
-
-      - name: Upload Hadolint SARIF
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hadolint-sarif
-          path: hadolint.sarif
-          retention-days: 14
-          if-no-files-found: warn
-
-      - name: Upload Hadolint SARIF to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: hadolint.sarif
-          category: hadolint
         continue-on-error: true
 
       - name: Set up Docker Buildx
