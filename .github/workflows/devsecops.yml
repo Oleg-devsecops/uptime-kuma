@@ -371,3 +371,49 @@ jobs:
           docker push $IMAGE:latest
           docker push $IMAGE:sha-$SHA_SHORT
 
+  # ===========================================================================
+  # 7. DEPLOY — автоматический деплой на VPS
+  # ---------------------------------------------------------------------------
+  # Запускается только на push в master после успешного build-and-push.
+  # Заходит по SSH под пользователем deploy и обновляет контейнер.
+  # Использует секреты GitHub: VPS_HOST, VPS_USER, VPS_SSH_PRIVATE_KEY.
+  # ===========================================================================
+  deploy-staging:
+    name: Deploy to Staging (VPS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build, sast-semgrep, secrets-gitleaks, sca, container, build-and-push]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: http://89.23.97.174
+    permissions:
+      contents: read
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            cd /home/deploy/project
+            echo "=== Pulling latest image ==="
+            docker compose pull
+            echo "=== Restarting container ==="
+            docker compose up -d
+            echo "=== Container status ==="
+            docker compose ps
+            echo "=== Waiting for healthy ==="
+            for i in 1 2 3 4 5 6; do
+              sleep 5
+              if docker compose ps | grep -q "(healthy)"; then
+                echo "Service is healthy"
+                exit 0
+              fi
+            done
+            echo "Service did not become healthy in 30s"
+            docker compose logs --tail 30
+            exit 1
