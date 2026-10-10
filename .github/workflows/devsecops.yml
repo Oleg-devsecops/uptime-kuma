@@ -417,3 +417,74 @@ jobs:
             echo "Service did not become healthy in 30s"
             docker compose logs --tail 30
             exit 1
+
+  # ===========================================================================
+  # 8. DAST — динамический анализ работающего сервиса (OWASP ZAP)
+  # ---------------------------------------------------------------------------
+  # Запускается после deploy-staging.
+  # Сканирует публично доступный staging: http://89.23.97.174
+  # ZAP baseline — «безопасный» режим: пассивное сканирование + активные
+  # проверки без разрушительных payload'ов.
+  # Отчёты (HTML, JSON, SARIF) сохраняются в артефактах.
+  # ===========================================================================
+  dast-zap:
+    name: DAST (OWASP ZAP baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Wait for staging service
+        run: |
+          echo "Waiting for http://89.23.97.174 ..."
+          for i in $(seq 1 30); do
+            if curl -sSf -o /dev/null -m 5 http://89.23.97.174; then
+              echo "Service is up (attempt $i)"
+              exit 0
+            fi
+            echo "attempt $i: not ready, sleeping 5s"
+            sleep 5
+          done
+          echo "Service did not become ready in 150s"
+          exit 1
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://89.23.97.174'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j'
+          allow_issue_writing: true
+          artifact_name: 'zap-baseline-report'
+        continue-on-error: true
+
+      - name: Upload ZAP reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-artifacts
+          path: |
+            report_html.html
+            report_json.json
+            report_md.md
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload ZAP SARIF to GitHub Security
+        if: always() && hashFiles('report_json.json') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: report_json.json
+          category: zap-baseline
+        continue-on-error: true
+

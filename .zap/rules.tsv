@@ -1,0 +1,11 @@
+# Правила для OWASP ZAP baseline scan
+# Формат: <rule_id>	<IGNORE|WARN|FAIL>	<comment>
+#
+# IGNORE — не сообщать
+# WARN   — сообщить, но не блокировать
+# FAIL   — считать серьёзной (по умолчанию ZAP помечает как WARN)
+
+# Примеры часто игнорируемых rule_id (некритичные для baseline):
+10015	IGNORE	# Incomplete or No Cache-control Header Set — не критично для API
+10096	IGNORE	# Timestamp Disclosure — редко реальная уязвимость
+10109	IGNORE	# Modern Web Application — не уязвимость
