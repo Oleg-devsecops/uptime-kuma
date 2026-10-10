@@ -350,9 +350,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image to GHCR
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          IMAGE=ghcr.io/${{ github.repository_owner }}/uptime-kuma
+          # GHCR требует имя образа в нижнем регистре — приводим явно
+          OWNER_LOWER=$(echo "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')
+          IMAGE=ghcr.io/${OWNER_LOWER}/uptime-kuma
           SHA_SHORT=$(echo $GITHUB_SHA | cut -c1-7)
+
+          echo "Building: $IMAGE:latest"
+          echo "Building: $IMAGE:sha-$SHA_SHORT"
 
           docker build \
             --target release \
@@ -363,5 +370,4 @@ jobs:
 
           docker push $IMAGE:latest
           docker push $IMAGE:sha-$SHA_SHORT
-
 
