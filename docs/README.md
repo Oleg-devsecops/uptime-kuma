@@ -155,3 +155,83 @@ uptime-kuma/
 
 **Автор:** Олег Богдашкин  
 **Дата:** 11 октября 2026
+---
+
+## Полный список документов
+
+| Документ | Что описывает |
+|---|---|
+| [README.md](README.md) | Обзор проекта, архитектура, результаты |
+| [ci-cd.md](ci-cd.md) | Все 9 стадий пайплайна: инструменты, конфиги, обоснования |
+| [sast.md](sast.md) | Semgrep + CodeQL, аналитика выбора, сравнение |
+| [dast.md](dast.md) | OWASP ZAP baseline, конфигурация, результаты сканирования |
+| [security-checks.md](security-checks.md) | Gitleaks, Trivy fs/image, Hadolint, npm audit |
+| [security-gateway.md](security-gateway.md) | Пороги, стоп-релиз, автокомментирование в PR |
+| [growth-zones.md](growth-zones.md) | Честный анализ ограничений и план улучшений |
+
+---
+
+## Итоговые результаты
+
+### Технические
+
+- **9 job'ов** в CI/CD пайплайне — все зелёные.
+- **8 инструментов безопасности** интегрированы.
+- **0 Critical, 0 High** на момент последнего прогона.
+- **Автодеплой** работает end-to-end (коммит → GHCR → VPS).
+- **Security Gateway** блокирует релиз при Critical/High.
+- **PR-комментарии** с рекомендациями работают.
+
+### Документация
+
+- **7 документов** (этот + 6 остальных) покрывают все аспекты.
+- **~1500 строк** markdown-описания.
+- Все решения обоснованы с аналитикой.
+
+### Инфраструктура
+
+- **VPS:** Debian 13 (Trixie), UFW, Fail2Ban, SSH hardening.
+- **Пользователи:** `diploma` (админ), `deploy` (CI/CD, без sudo).
+- **Контейнеризация:** Docker + Docker Compose.
+- **Registry:** GitHub Container Registry (публичный образ).
+
+---
+
+## Демонстрация для защиты
+
+Если нужно показать работу в реальном времени:
+
+### 1. Push нового коммита
+
+```bash
+cd ~/uptime-kuma
+echo "" >> docs/README.md
+git add docs/README.md
+git commit -m "docs: trigger full pipeline demo"
+git push origin master
+2. Наблюдение за pipeline
+text
+https://github.com/oleg-devsecops/uptime-kuma/actions
+Все 9 job'ов пройдут за ~13 минут.
+
+3. Проверка деплоя
+text
+http://89.23.97.174
+Сервис обновляется автоматически.
+
+4. Проверка PR-комментариев
+Создай тестовую ветку, открой PR в свой форк — Security Gateway прокомментирует.
+
+Ссылки на защиту
+Репозиторий: https://github.com/Oleg-devsecops/uptime-kuma
+
+Actions: https://github.com/Oleg-devsecops/uptime-kuma/actions/workflows/devsecops.yml
+
+Security Dashboard: https://github.com/Oleg-devsecops/uptime-kuma/security/code-scanning
+
+Packages (GHCR): https://github.com/Oleg-devsecops?tab=packages
+
+Staging: http://89.23.97.174
+
+Благодарности
+Проект основан на Uptime Kuma — open-source uptime-мониторинге от Louis Lam и сообщества. Дипломная работа выполнена как форк с полной переработкой CI/CD в DevSecOps-парадигму.
